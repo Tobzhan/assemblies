@@ -2,3 +2,6 @@ numpy
 matplotlib
 scipy
 pptree
+dash
+dash-cytoscape
+plotly
