@@ -150,7 +150,15 @@ class Brain:
             size, self.p,
             size=self.area_by_name[area_name].n).astype(np.float32)
       else:
-        this_stimulus_connectomes[area_name] = np.empty(0, dtype=np.float32)
+        # If the area already has some winners (w > 0), we must initialize 
+        # the connectome to match that size, otherwise projection will fail
+        # with shape mismatch.
+        current_w = self.area_by_name[area_name].w
+        if current_w > 0:
+             this_stimulus_connectomes[area_name] = self._rng.binomial(
+                size, self.p, size=current_w).astype(np.float32)
+        else:
+             this_stimulus_connectomes[area_name] = np.empty(0, dtype=np.float32)
       self.area_by_name[area_name].beta_by_stimulus[stimulus_name] = (
         self.area_by_name[area_name].beta)
     self.connectomes_by_stimulus[stimulus_name] = this_stimulus_connectomes

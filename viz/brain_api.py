@@ -71,12 +71,14 @@ class LiveBrain:
                 if (other, name) not in self._fibers:
                     self._fibers.append((other, name))
 
-        return self._log("add_area", f"Added area '{name}' (n={n}, k={k}, β={beta})")
+        return self._log("add_area", f"Added area '{name}' (n={n}, k={k}, β={beta})",
+                         involved_areas={name})
 
     def add_stimulus(self, name: str, size: int = 100) -> StepRecord:
         """Add a stimulus source."""
         self.brain.add_stimulus(name, size)
-        return self._log("add_stimulus", f"Added stimulus '{name}' (size={size})")
+        return self._log("add_stimulus", f"Added stimulus '{name}' (size={size})",
+                         involved_areas=set())
 
     def get_areas(self) -> list[str]:
         """Get list of area names."""
@@ -101,7 +103,8 @@ class LiveBrain:
                 {},                    # no area→area projection
             )
             record = self._log("stimulate",
-                               f"Stimulate '{stimulus}' → '{area}' [{r+1}/{rounds}]")
+                               f"Stimulate '{stimulus}' → '{area}' [{r+1}/{rounds}]",
+                               involved_areas={area})
         return record
 
     def project(self, src: str, dst: str, rounds: int = 1) -> StepRecord:
@@ -113,7 +116,8 @@ class LiveBrain:
                 {src: [dst]},           # src → dst
             )
             record = self._log("project",
-                               f"Project '{src}' → '{dst}' [{r+1}/{rounds}]")
+                               f"Project '{src}' → '{dst}' [{r+1}/{rounds}]",
+                               involved_areas={dst})
         return record
 
     def reciprocal_project(self, area_a: str, area_b: str,
@@ -126,7 +130,8 @@ class LiveBrain:
                 {area_a: [area_b], area_b: [area_a]},
             )
             record = self._log("reciprocal",
-                               f"Reciprocal '{area_a}' ↔ '{area_b}' [{r+1}/{rounds}]")
+                               f"Reciprocal '{area_a}' ↔ '{area_b}' [{r+1}/{rounds}]",
+                               involved_areas={area_a, area_b})
         return record
 
     def stimulate_and_project(self, stimulus: str, stim_area: str,
@@ -141,7 +146,8 @@ class LiveBrain:
                 area_map = {stim_area: [dst]}
             self.brain.project(stim_map, area_map)
         return self._log("stim+project",
-                         f"Stim '{stimulus}'→'{stim_area}' + Project '{src}'→'{dst}' ×{rounds}")
+                         f"Stim '{stimulus}'→'{stim_area}' + Project '{src}'→'{dst}' ×{rounds}",
+                         involved_areas={stim_area, dst})
 
     def associate(self, stim_a: str, stim_b: str, area: str,
                   rounds: int = 1) -> StepRecord:
@@ -157,7 +163,8 @@ class LiveBrain:
                 {},
             )
             record = self._log("associate",
-                               f"Associate '{stim_a}'+'{stim_b}' → '{area}' [{r+1}/{rounds}]")
+                               f"Associate '{stim_a}'+'{stim_b}' → '{area}' [{r+1}/{rounds}]",
+                               involved_areas={area})
         return record
 
     def merge(self, src_a: str, src_b: str, dst: str,
@@ -174,7 +181,8 @@ class LiveBrain:
                 {src_a: [dst], src_b: [dst]},  # both areas → target
             )
             record = self._log("merge",
-                               f"Merge '{src_a}'+'{src_b}' → '{dst}' [{r+1}/{rounds}]")
+                               f"Merge '{src_a}'+'{src_b}' → '{dst}' [{r+1}/{rounds}]",
+                               involved_areas={dst})
         return record
 
     # ── Learning toggle ─────────────────────────────────────────────────
@@ -294,6 +302,14 @@ class LiveBrain:
             history.append(snap.get("n_winners", 0))
         return history
 
+    def get_involvement_history(self, area_name: str) -> list[bool]:
+        """Get per-step involvement flags for an area."""
+        history = []
+        for step in self.steps:
+            snap = step.areas_snapshot.get(area_name, {})
+            history.append(snap.get("involved", True))
+        return history
+
     # ── DFA Sequence Training & Testing ──────────────────────────────
 
     def setup_dfa(self, alphabet: str = "ab", n: int = 500,
@@ -313,7 +329,8 @@ class LiveBrain:
             self.add_stimulus(ch, size=k)
 
         self._log("setup_dfa",
-                  f"DFA setup: alphabet='{alphabet}', areas=Input/State/Accept/Reject")
+                  f"DFA setup: alphabet='{alphabet}', areas=Input/State/Accept/Reject",
+                  involved_areas={"Input", "State", "Accept", "Reject"})
 
     def process_string(self, s: str, stabilize: int = 3) -> None:
         """Feed a string character by character through Input→State.
@@ -351,7 +368,8 @@ class LiveBrain:
             self.brain.project({}, {"State": [target]})
 
         label = "✅ ACCEPT" if accepted else "❌ REJECT"
-        self._log("train", f"Train '{s}' → {label}")
+        self._log("train", f"Train '{s}' → {label}",
+                  involved_areas={"Input", "State", target})
 
     def train_batch(self, accepted: list[str], rejected: list[str],
                     epochs: int = 5, stabilize: int = 3,
@@ -373,7 +391,8 @@ class LiveBrain:
 
         total = len(all_examples) * epochs
         self._log("train_batch",
-                  f"Trained {epochs} epochs × {len(all_examples)} strings = {total} total")
+                  f"Trained {epochs} epochs × {len(all_examples)} strings = {total} total",
+                  involved_areas={"Input", "State", "Accept", "Reject"})
 
         return {
             "epochs": epochs,
@@ -441,7 +460,8 @@ class LiveBrain:
         self._log("test",
                   f"Test '{s}' → {emoji} {verdict} "
                   f"(accept={accept_overlap:.3f}, reject={reject_overlap:.3f}, "
-                  f"conf={confidence:.2f})")
+                  f"conf={confidence:.2f})",
+                  involved_areas={"Input", "State", "Accept", "Reject"})
 
         return result
 
@@ -584,24 +604,48 @@ class LiveBrain:
         # Clear step history (it's a new session)
         self.steps.clear()
         self._last_snapshot.clear()
-        self._log("load", f"Loaded brain from '{directory}'")
+        self._log("load", f"Loaded brain from '{directory}'",
+                  involved_areas=set(self.brain.area_by_name.keys()))
 
     # ── Internal ────────────────────────────────────────────────────────
 
-    def _log(self, operation: str, description: str) -> StepRecord:
-        """Log current state as a step."""
+    def _log(self, operation: str, description: str,
+             involved_areas: set = None) -> StepRecord:
+        """Log current state as a step.
+
+        Args:
+            involved_areas: set of area names that were actually projected to
+                in this operation. Only these areas get their prev_winners
+                updated. Uninvolved areas keep their last real overlap and
+                are marked with involved=False in the snapshot.
+        """
+        if involved_areas is None:
+            involved_areas = set(self.brain.area_by_name.keys())
+
         snapshot = {}
         for name in self.brain.area_by_name:
             state = self.get_area_state(name)
+            if name in involved_areas:
+                state["involved"] = True
+            else:
+                # Not involved: carry forward last real overlap value
+                prev_snap = self._last_snapshot.get(name, {})
+                state["overlap_prev"] = prev_snap.get("overlap_prev", 0.0)
+                state["gained"] = 0
+                state["lost"] = 0
+                state["gained_set"] = set()
+                state["lost_set"] = set()
+                state["involved"] = False
             snapshot[name] = state
 
         # Cache snapshot for display (before updating prev_winners!)
         self._last_snapshot = snapshot
 
-        # Now update prev_winners for next step
-        for name in self.brain.area_by_name:
-            area = self.brain.area_by_name[name]
-            self._prev_winners[name] = set(area.winners) if area.winners else set()
+        # Only update prev_winners for areas that were actually involved
+        for name in involved_areas:
+            if name in self.brain.area_by_name:
+                area = self.brain.area_by_name[name]
+                self._prev_winners[name] = set(area.winners) if area.winners else set()
 
         record = StepRecord(
             step=self._step_counter,

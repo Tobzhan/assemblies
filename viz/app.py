@@ -869,17 +869,19 @@ def _render_neuron_detail(area_name):
 
     # Assembly status
     overlap = state.get("overlap_prev", 0)
+    involved = state.get("involved", True)
+    paused = " ⏸ (not involved)" if not involved and winners else ""
     if not winners:
         asm_label = "⚪ No assembly"
         asm_color = "#666"
     elif overlap >= 0.9:
-        asm_label = f"🟢 Assembly CONVERGED ({overlap:.0%} stable)"
+        asm_label = f"🟢 Assembly CONVERGED ({overlap:.0%} stable){paused}"
         asm_color = "#4ade80"
     elif overlap >= 0.5:
-        asm_label = f"🟡 Assembly FORMING ({overlap:.0%})"
+        asm_label = f"🟡 Assembly FORMING ({overlap:.0%}){paused}"
         asm_color = "#fbbf24"
     else:
-        asm_label = f"🟠 Assembly UNSTABLE ({overlap:.0%})"
+        asm_label = f"🟠 Assembly UNSTABLE ({overlap:.0%}){paused}"
         asm_color = "#fb923c"
 
     # Summary header
@@ -979,17 +981,19 @@ def _render_graph(areas, state_override=None):
         area_state = state.get(area_name, {})
         n_winners = area_state.get("n_winners", 0)
         overlap = area_state.get("overlap_prev", 0)
+        involved = area_state.get("involved", True)
 
         # Node styling based on activation
         classes = ["area"]
         if n_winners > 0:
             classes.append("active")
-            if overlap > 0.9:
+            if overlap > 0.9 and involved:
                 classes.append("converged")
 
         label = f"{area_name}\n{n_winners}w"
         if n_winners > 0:
-            label += f"\n{overlap:.0%}"
+            suffix = "" if involved else " ⏸"
+            label += f"\n{overlap:.0%}{suffix}"
 
         elements.append({
             "data": {"id": area_name, "label": label},
@@ -1064,6 +1068,7 @@ def _render_area_table():
         state = _brain._last_snapshot.get(name, _brain.get_area_state(name))
         overlap = state.get("overlap_prev", 0)
         n_w = state.get("n_winners", 0)
+        involved = state.get("involved", True)
 
         # Color code overlap
         if n_w == 0:
@@ -1075,6 +1080,14 @@ def _render_area_table():
         else:
             ov_color = "#f87171"
 
+        # Dim uninvolved areas
+        if not involved and n_w > 0:
+            ov_text = f"{overlap:.0%} ⏸"
+            ov_style_extra = {"fontStyle": "italic", "opacity": "0.55"}
+        else:
+            ov_text = f"{overlap:.0%}"
+            ov_style_extra = {}
+
         row_style = {"padding": "3px 8px", "fontSize": "12px",
                      "borderBottom": "1px solid #1e1e3a", "color": "#ddd"}
 
@@ -1083,7 +1096,7 @@ def _render_area_table():
             html.Td(str(state.get("n", 0)), style=row_style),
             html.Td(str(state.get("k", 0)), style=row_style),
             html.Td(str(n_w), style={**row_style, "color": "#4ade80" if n_w > 0 else "#666"}),
-            html.Td(f"{overlap:.0%}", style={**row_style, "color": ov_color}),
+            html.Td(ov_text, style={**row_style, "color": ov_color, **ov_style_extra}),
             html.Td(f"+{state.get('gained', 0)}", style={**row_style, "color": "#4ade80"}),
             html.Td(f"-{state.get('lost', 0)}", style={**row_style, "color": "#f87171"}),
             html.Td(f"{state.get('beta', 0):.2f}", style={**row_style, "color": "#aaa"}),
@@ -1115,16 +1128,48 @@ def _render_convergence(area):
 
     if area:
         history = _brain.get_overlap_history(area)
+        involvement = _brain.get_involvement_history(area)
         if history:
+            # Split into involved vs uninvolved points for distinct styling
+            inv_x, inv_y = [], []
+            uninv_x, uninv_y = [], []
+            for i, (val, inv) in enumerate(zip(history, involvement)):
+                if inv:
+                    inv_x.append(i)
+                    inv_y.append(val)
+                else:
+                    uninv_x.append(i)
+                    uninv_y.append(val)
+
+            # Main line: all points connected
             fig.add_trace(go.Scatter(
                 y=history,
-                mode="lines+markers",
+                mode="lines",
                 name="Overlap with prev",
                 line={"color": "#10b981", "width": 2},
-                marker={"size": 4},
                 fill="tozeroy",
                 fillcolor="rgba(16, 185, 129, 0.1)",
+                showlegend=True,
             ))
+
+            # Involved steps: solid markers
+            if inv_x:
+                fig.add_trace(go.Scatter(
+                    x=inv_x, y=inv_y,
+                    mode="markers",
+                    name="Active step",
+                    marker={"size": 5, "color": "#10b981"},
+                ))
+
+            # Uninvolved steps: open circle markers
+            if uninv_x:
+                fig.add_trace(go.Scatter(
+                    x=uninv_x, y=uninv_y,
+                    mode="markers",
+                    name="Not involved ⏸",
+                    marker={"size": 6, "color": "rgba(0,0,0,0)",
+                            "line": {"color": "#666", "width": 1.5}},
+                ))
 
             # Convergence threshold
             fig.add_hline(y=0.9, line_dash="dot", line_color="#fbbf24",
