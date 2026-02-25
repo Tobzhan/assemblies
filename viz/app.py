@@ -269,104 +269,7 @@ def create_app(brain=None):
                                                            "color": "#4ade80", "marginTop": "4px"}),
                         ]),
 
-                        # 7. DFA Trainer
-                        _panel("🎯 DFA Trainer", [
-                            # Setup row
-                            html.Div("Setup (resets brain):",
-                                     style={"color": muted, "fontSize": "12px",
-                                            "marginBottom": "4px"}),
-                            html.Div(style={"display": "flex", "gap": "6px",
-                                            "marginBottom": "8px"}, children=[
-                                dcc.Input(id="dfa-alphabet", type="text",
-                                          value="ab", placeholder="Alphabet",
-                                          style={"width": "60px",
-                                                 "backgroundColor": "#1a1a2e",
-                                                 "color": "#ccc",
-                                                 "border": "1px solid #333",
-                                                 "borderRadius": "4px",
-                                                 "padding": "4px 6px",
-                                                 "fontSize": "12px"}),
-                                _btn("⚙️ Setup DFA", "btn-dfa-setup",
-                                     color="#2a3a2a"),
-                            ]),
 
-                            # Training strings
-                            html.Div("Accepted strings (comma-sep):",
-                                     style={"color": muted, "fontSize": "12px",
-                                            "marginBottom": "2px"}),
-                            dcc.Input(id="dfa-accepted", type="text",
-                                      value="a,ab,abb,abbb",
-                                      placeholder="a,ab,abb,...",
-                                      style={"width": "100%",
-                                             "marginBottom": "6px",
-                                             "backgroundColor": "#1a1a2e",
-                                             "color": "#ccc",
-                                             "border": "1px solid #333",
-                                             "borderRadius": "4px",
-                                             "padding": "4px 8px",
-                                             "fontSize": "12px"}),
-                            html.Div("Rejected strings (comma-sep):",
-                                     style={"color": muted, "fontSize": "12px",
-                                            "marginBottom": "2px"}),
-                            dcc.Input(id="dfa-rejected", type="text",
-                                      value="b,ba,aa,bb,bba",
-                                      placeholder="b,ba,aa,...",
-                                      style={"width": "100%",
-                                             "marginBottom": "6px",
-                                             "backgroundColor": "#1a1a2e",
-                                             "color": "#ccc",
-                                             "border": "1px solid #333",
-                                             "borderRadius": "4px",
-                                             "padding": "4px 8px",
-                                             "fontSize": "12px"}),
-
-                            # Training controls
-                            html.Div(style={"display": "flex", "gap": "6px",
-                                            "alignItems": "center",
-                                            "marginBottom": "8px"}, children=[
-                                html.Span("Epochs:", style={"color": muted,
-                                                            "fontSize": "12px"}),
-                                dcc.Input(id="dfa-epochs", type="number",
-                                          value=5, min=1, max=50,
-                                          style={"width": "50px",
-                                                 "backgroundColor": "#1a1a2e",
-                                                 "color": "#ccc",
-                                                 "border": "1px solid #333",
-                                                 "borderRadius": "4px",
-                                                 "padding": "4px",
-                                                 "fontSize": "12px"}),
-                                _btn("🏋️ Train", "btn-dfa-train",
-                                     color="#4a3a1a"),
-                            ]),
-
-                            html.Div(id="dfa-train-msg", style={
-                                "fontSize": "11px", "color": "#fbbf24",
-                                "marginBottom": "8px"}),
-
-                            # Testing
-                            html.Div("Test string:",
-                                     style={"color": muted, "fontSize": "12px",
-                                            "marginBottom": "2px"}),
-                            html.Div(style={"display": "flex", "gap": "6px",
-                                            "marginBottom": "6px"}, children=[
-                                dcc.Input(id="dfa-test-str", type="text",
-                                          placeholder="e.g. abbb",
-                                          style={"width": "120px",
-                                                 "backgroundColor": "#1a1a2e",
-                                                 "color": "#ccc",
-                                                 "border": "1px solid #333",
-                                                 "borderRadius": "4px",
-                                                 "padding": "4px 8px",
-                                                 "fontSize": "12px"}),
-                                _btn("🧪 Test", "btn-dfa-test",
-                                     color="#1a3a4a"),
-                            ]),
-                            html.Div(id="dfa-test-result", style={
-                                "fontSize": "12px",
-                                "padding": "6px",
-                                "borderRadius": "4px",
-                                "backgroundColor": "#0f0f1a"}),
-                        ]),
 
                         # 8. Operation log
                         _panel("📝 Log", [
@@ -654,88 +557,6 @@ def create_app(brain=None):
         except Exception as e:
             return f"❌ Load failed: {e}", refresh
 
-    # == DFA Setup ==
-    @app.callback(
-        Output("dfa-train-msg", "children"),
-        Output("refresh-trigger", "data", allow_duplicate=True),
-        Input("btn-dfa-setup", "n_clicks"),
-        State("dfa-alphabet", "value"),
-        State("refresh-trigger", "data"),
-        prevent_initial_call=True,
-    )
-    def dfa_setup(n_clicks, alphabet, refresh):
-        if not alphabet or not alphabet.strip():
-            return "⚠️ Enter alphabet characters", refresh
-        alphabet = alphabet.strip()
-        try:
-            _brain.setup_dfa(alphabet=alphabet)
-            return (f"⚙️ DFA ready: alphabet='{alphabet}', "
-                    f"areas: Input, State, Accept, Reject"), refresh + 1
-        except Exception as e:
-            return f"❌ Setup failed: {e}", refresh
-
-    # == DFA Train ==
-    @app.callback(
-        Output("dfa-train-msg", "children", allow_duplicate=True),
-        Output("refresh-trigger", "data", allow_duplicate=True),
-        Input("btn-dfa-train", "n_clicks"),
-        State("dfa-accepted", "value"),
-        State("dfa-rejected", "value"),
-        State("dfa-epochs", "value"),
-        State("refresh-trigger", "data"),
-        prevent_initial_call=True,
-    )
-    def dfa_train(n_clicks, accepted_str, rejected_str, epochs, refresh):
-        if not accepted_str and not rejected_str:
-            return "⚠️ Enter some training strings", refresh
-        accepted = [s.strip() for s in (accepted_str or "").split(",")
-                    if s.strip()]
-        rejected = [s.strip() for s in (rejected_str or "").split(",")
-                    if s.strip()]
-        epochs = max(1, int(epochs or 5))
-        try:
-            result = _brain.train_batch(accepted, rejected, epochs=epochs)
-            return (f"🏋️ Trained! {result['epochs']} epochs × "
-                    f"{result['accepted_count']+result['rejected_count']} strings = "
-                    f"{result['total_trainings']} rounds"), refresh + 1
-        except Exception as e:
-            return f"❌ Train failed: {e}", refresh
-
-    # == DFA Test ==
-    @app.callback(
-        Output("dfa-test-result", "children"),
-        Output("refresh-trigger", "data", allow_duplicate=True),
-        Input("btn-dfa-test", "n_clicks"),
-        State("dfa-test-str", "value"),
-        State("refresh-trigger", "data"),
-        prevent_initial_call=True,
-    )
-    def dfa_test(n_clicks, test_str, refresh):
-        if not test_str or not test_str.strip():
-            return "⚠️ Enter a test string", refresh
-        test_str = test_str.strip()
-        try:
-            result = _brain.test_string(test_str)
-            v = result["verdict"]
-            if v == "ACCEPT":
-                color, emoji = "#4ade80", "✅"
-            elif v == "REJECT":
-                color, emoji = "#f87171", "❌"
-            else:
-                color, emoji = "#fbbf24", "❓"
-            return html.Div([
-                html.Span(f"{emoji} '{test_str}' → {v}",
-                          style={"color": color, "fontWeight": "bold",
-                                 "fontSize": "13px"}),
-                html.Br(),
-                html.Span(
-                    f"Accept overlap: {result['accept_overlap']:.4f} | "
-                    f"Reject overlap: {result['reject_overlap']:.4f} | "
-                    f"Confidence: {result['confidence']:.2%}",
-                    style={"color": "#888", "fontSize": "11px"}),
-            ]), refresh + 1
-        except Exception as e:
-            return f"❌ Test failed: {e}", refresh
 
     # == Master refresh: update all dropdowns + status + viz ==
     @app.callback(
@@ -1061,7 +882,7 @@ def _render_area_table():
     rows.append(html.Tr([
         html.Th(h, style={"padding": "4px 8px", "borderBottom": "1px solid #3a3a5a",
                           "color": "#aaa", "fontSize": "11px", "textAlign": "left"})
-        for h in ["Area", "n", "k", "Winners", "Overlap", "Gained", "Lost", "β"]
+        for h in ["Area", "n", "k", "Winners", "Overlap", "Δ", "β"]
     ]))
 
     for name in areas:
@@ -1097,8 +918,8 @@ def _render_area_table():
             html.Td(str(state.get("k", 0)), style=row_style),
             html.Td(str(n_w), style={**row_style, "color": "#4ade80" if n_w > 0 else "#666"}),
             html.Td(ov_text, style={**row_style, "color": ov_color, **ov_style_extra}),
-            html.Td(f"+{state.get('gained', 0)}", style={**row_style, "color": "#4ade80"}),
-            html.Td(f"-{state.get('lost', 0)}", style={**row_style, "color": "#f87171"}),
+            html.Td(f"+{state.get('gained', 0)} / −{state.get('lost', 0)}",
+                    style={**row_style, "color": "#aaa", "fontSize": "11px"}),
             html.Td(f"{state.get('beta', 0):.2f}", style={**row_style, "color": "#aaa"}),
         ]))
 
