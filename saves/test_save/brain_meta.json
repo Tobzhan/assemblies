@@ -1,0 +1,41 @@
+{
+  "p": 0.1,
+  "seed": 42,
+  "default_beta": 0.05,
+  "learning": true,
+  "step_counter": 7,
+  "fibers": [],
+  "areas": {
+    "A": {
+      "n": 100,
+      "k": 10,
+      "beta": 0.05,
+      "w": 100,
+      "explicit": true,
+      "winners": [
+        34,
+        23,
+        7,
+        14,
+        35,
+        48,
+        59,
+        67,
+        83,
+        97
+      ],
+      "fixed_assembly": false,
+      "beta_by_stimulus": {
+        "s": 0.05
+      },
+      "beta_by_area": {
+        "A": 0.05
+      }
+    }
+  },
+  "stimuli": {
+    "s": {
+      "size": 10
+    }
+  }
+}
