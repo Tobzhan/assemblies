@@ -211,6 +211,8 @@
     renderer = new Sigma(graph, container, {
       renderEdgeLabels: false,
       defaultEdgeType: 'arrow',
+      enableEdgeClickEvents: true,
+      enableEdgeHoverEvents: true,
       edgeReducer: (edge, data) => ({
         ...data,
         hidden: !showEdges,

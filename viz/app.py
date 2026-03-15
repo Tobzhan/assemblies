@@ -290,9 +290,11 @@ def create_app(brain=None):
                                    "gridTemplateColumns": "1fr 1fr",
                                    "gap": "12px"},
                             children=[
-                                _panel("🕸️ Brain Graph  —  click an area to inspect", [
+                                _panel("🕸️ Brain Graph  —  click node/edge to inspect", [
                                     html.Div(id="graph-container",
                                              style={"minHeight": "320px"}),
+                                    html.Div(id="edge-weight-detail",
+                                             style={"marginTop": "8px"}),
                                     html.Div(id="neuron-detail",
                                              style={"marginTop": "8px"}),
                                 ]),
@@ -342,6 +344,7 @@ def create_app(brain=None):
             # Hidden stores for triggering updates
             dcc.Store(id="refresh-trigger", data=0),
             dcc.Store(id="selected-area", data=None),
+            dcc.Store(id="nav-open-signal", data=None),
         ],
     )
 
@@ -660,6 +663,19 @@ def create_app(brain=None):
     def update_neuron_detail(area_name, trigger):
         return _render_neuron_detail(area_name)
 
+    # == Edge click → show weight stats inline ==
+    @app.callback(
+        Output("edge-weight-detail", "children"),
+        Input("cyto-graph", "tapEdgeData"),
+        prevent_initial_call=True,
+    )
+    def on_edge_click(edge_data):
+        if edge_data and edge_data.get("area_a") and edge_data.get("area_b"):
+            return _render_edge_weight_detail(edge_data["area_a"], edge_data["area_b"])
+        raise dash.exceptions.PreventUpdate
+
+
+
     # ── Flask API Routes for Sigma.js pages ──────────────────────────
 
     @app.server.route("/api/area/<area_name>")
@@ -729,6 +745,19 @@ def _render_neuron_detail(area_name):
         asm_color = "#fb923c"
 
     # Summary header
+    explore_btn = html.A(
+        "🔬 Explore Neurons",
+        href=f"/viz/area?area={area_name}",
+        target="_blank",
+        style={
+            "backgroundColor": "#6366f1", "color": "#fff",
+            "border": "none", "borderRadius": "6px",
+            "padding": "4px 12px", "cursor": "pointer",
+            "fontSize": "11px", "fontWeight": "600",
+            "textDecoration": "none", "marginLeft": "auto",
+        },
+    )
+
     header = html.Div([
         html.Span(f"Area '{area_name}'", style={
             "fontWeight": "700", "fontSize": "14px", "marginRight": "12px"}),
@@ -741,8 +770,10 @@ def _render_neuron_detail(area_name):
         html.Span(f"🔻 -{len(lost)} lost", style={
             "color": "#f87171", "fontSize": "11px", "marginRight": "8px"}),
         html.Span(f"⚫ {n - len(winners)} inactive", style={
-            "color": "#666", "fontSize": "11px"}),
-    ], style={"marginBottom": "8px"})
+            "color": "#666", "fontSize": "11px", "marginRight": "8px"}),
+        explore_btn,
+    ], style={"marginBottom": "8px", "display": "flex",
+             "alignItems": "center", "flexWrap": "wrap", "gap": "4px"})
 
     # Neuron grid — show up to 500 neurons
     max_display = min(n, 500)
@@ -798,6 +829,73 @@ def _render_neuron_detail(area_name):
         children.append(footer)
 
     return html.Div(children, style={
+        "backgroundColor": "#0f0f1a", "borderRadius": "8px",
+        "padding": "10px", "border": "1px solid #2a2a4a",
+    })
+
+
+def _render_edge_weight_detail(area_a, area_b):
+    """Render weight stats for a clicked edge between two areas."""
+    stats_ab = _brain.get_weight_stats(area_a, area_b)
+    stats_ba = _brain.get_weight_stats(area_b, area_a)
+
+    def _stat_row(label, val_ab, val_ba, fmt=".4f", color="#ddd"):
+        return html.Tr([
+            html.Td(label, style={"padding": "3px 8px", "fontSize": "12px",
+                                   "color": "#aaa", "fontWeight": "600"}),
+            html.Td(f"{val_ab:{fmt}}", style={"padding": "3px 8px",
+                     "fontSize": "12px", "color": color, "textAlign": "right"}),
+            html.Td(f"{val_ba:{fmt}}", style={"padding": "3px 8px",
+                     "fontSize": "12px", "color": color, "textAlign": "right"}),
+        ])
+
+    max_w = max(stats_ab.get("max", 0), stats_ba.get("max", 0))
+    strengthened = max_w > 1.001
+    badge_color = "#4ade80" if strengthened else "#666"
+    badge_text = f"★ Strengthened (max {max_w:.4f})" if strengthened else "No strengthening yet"
+
+    table = html.Table([
+        html.Tr([
+            html.Th("", style={"padding": "3px 8px"}),
+            html.Th(f"{area_a} → {area_b}", style={"padding": "3px 8px",
+                     "fontSize": "11px", "color": "#6366f1", "textAlign": "right"}),
+            html.Th(f"{area_b} → {area_a}", style={"padding": "3px 8px",
+                     "fontSize": "11px", "color": "#a78bfa", "textAlign": "right"}),
+        ]),
+        _stat_row("Mean (nonzero)", stats_ab.get("mean_nonzero", 0),
+                  stats_ba.get("mean_nonzero", 0)),
+        _stat_row("Max weight", stats_ab.get("max", 0),
+                  stats_ba.get("max", 0),
+                  color="#4ade80" if strengthened else "#ddd"),
+        _stat_row("Nonzero conns", stats_ab.get("nonzero", 0),
+                  stats_ba.get("nonzero", 0), fmt="d", color="#6366f1"),
+        _stat_row("Std dev", stats_ab.get("std", 0), stats_ba.get("std", 0)),
+    ], style={"width": "100%", "borderCollapse": "collapse"})
+
+    explore_btn = html.A(
+        "🔗 Explore Connections",
+        href=f"/viz/cross?a={area_a}&b={area_b}",
+        target="_blank",
+        style={
+            "backgroundColor": "#6366f1", "color": "#fff",
+            "border": "none", "borderRadius": "6px",
+            "padding": "4px 12px", "cursor": "pointer",
+            "fontSize": "11px", "fontWeight": "600",
+            "textDecoration": "none", "marginLeft": "auto",
+        },
+    )
+
+    return html.Div([
+        html.Div([
+            html.Span(f"⚖️ Edge: {area_a} ↔ {area_b}", style={
+                "fontWeight": "700", "fontSize": "13px", "marginRight": "12px"}),
+            html.Span(badge_text, style={
+                "color": badge_color, "fontSize": "11px"}),
+            explore_btn,
+        ], style={"marginBottom": "6px", "display": "flex",
+                 "alignItems": "center", "gap": "8px"}),
+        table,
+    ], style={
         "backgroundColor": "#0f0f1a", "borderRadius": "8px",
         "padding": "10px", "border": "1px solid #2a2a4a",
     })

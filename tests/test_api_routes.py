@@ -21,7 +21,7 @@ def client():
     brain.stimulate("s", "A", rounds=5)
     brain.project("A", "B", rounds=3)
     app = create_app(brain)
-    app.config["TESTING"] = True
+    app.server.config["TESTING"] = True
     with app.server.test_client() as c:
         yield c
 
