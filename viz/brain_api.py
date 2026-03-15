@@ -607,6 +607,218 @@ class LiveBrain:
         self._log("load", f"Loaded brain from '{directory}'",
                   involved_areas=set(self.brain.area_by_name.keys()))
 
+    # ── Graph Data for Sigma.js Visualization ──────────────────────────
+
+    def get_neuron_graph_data(self, area_name: str,
+                              winners_only_edges: bool = True) -> dict:
+        """Get neuron-level graph data for an area (for Sigma.js rendering).
+
+        Returns a JSON-serializable dict with:
+          - nodes: list of {id, is_winner, is_gained, is_lost}
+          - edges: list of {source, target, weight} from self-connectome
+          - meta: area stats
+
+        Args:
+            area_name: Name of the area.
+            winners_only_edges: If True, only include edges where at least one
+                endpoint is a winner neuron (reduces ~25K to ~5K edges).
+        """
+        area = self.brain.area_by_name.get(area_name)
+        if not area:
+            return {"nodes": [], "edges": [], "meta": {}}
+
+        state = self._last_snapshot.get(area_name, self.get_area_state(area_name))
+        winners = state.get("winners_set", set())
+        gained = state.get("gained_set", set())
+        lost = state.get("lost_set", set())
+
+        # Build nodes
+        nodes = []
+        for i in range(area.n):
+            node = {"id": i}
+            if i in gained:
+                node["state"] = "gained"
+            elif i in winners:
+                node["state"] = "winner"
+            elif i in lost:
+                node["state"] = "lost"
+            else:
+                node["state"] = "inactive"
+            nodes.append(node)
+
+        # Build edges from self-connectome
+        edges = []
+        connectome = self._get_connectome(area_name, area_name)
+        if connectome is not None and connectome.size > 0:
+            if winners_only_edges and winners:
+                # Only edges where at least one endpoint is a winner
+                winner_list = sorted(winners)
+                for src in winner_list:
+                    if src >= connectome.shape[0]:
+                        continue
+                    row = connectome[src]
+                    for tgt in range(min(area.n, connectome.shape[1])):
+                        w = float(row[tgt])
+                        if w > 0 and src != tgt:
+                            edges.append({
+                                "source": src, "target": tgt,
+                                "weight": round(w, 4),
+                            })
+            else:
+                # All nonzero edges
+                rows, cols = np.nonzero(connectome)
+                for idx in range(len(rows)):
+                    src, tgt = int(rows[idx]), int(cols[idx])
+                    if src != tgt and src < area.n and tgt < area.n:
+                        w = float(connectome[src, tgt])
+                        edges.append({
+                            "source": src, "target": tgt,
+                            "weight": round(w, 4),
+                        })
+
+        meta = {
+            "area": area_name,
+            "n": area.n,
+            "k": area.k,
+            "beta": area.beta,
+            "n_winners": len(winners),
+            "overlap": state.get("overlap_prev", 0),
+            "gained": len(gained),
+            "lost": len(lost),
+        }
+
+        return {"nodes": nodes, "edges": edges, "meta": meta}
+
+    def get_cross_area_graph_data(self, area_a: str, area_b: str,
+                                   winners_only: bool = True) -> dict:
+        """Get bipartite graph data for two areas (for Sigma.js rendering).
+
+        Returns a JSON-serializable dict with:
+          - nodes_a, nodes_b: neuron lists with firing state
+          - edges_ab: connections A→B (winner neurons only by default)
+          - edges_ba: connections B→A (winner neurons only by default)
+          - meta: summary stats
+        """
+        obj_a = self.brain.area_by_name.get(area_a)
+        obj_b = self.brain.area_by_name.get(area_b)
+        if not obj_a or not obj_b:
+            return {"nodes_a": [], "nodes_b": [],
+                    "edges_ab": [], "edges_ba": [], "meta": {}}
+
+        state_a = self._last_snapshot.get(area_a, self.get_area_state(area_a))
+        state_b = self._last_snapshot.get(area_b, self.get_area_state(area_b))
+
+        def _build_nodes(area_obj, state):
+            winners = state.get("winners_set", set())
+            gained = state.get("gained_set", set())
+            lost = state.get("lost_set", set())
+            nodes = []
+            for i in range(area_obj.n):
+                node = {"id": i}
+                if i in gained:
+                    node["state"] = "gained"
+                elif i in winners:
+                    node["state"] = "winner"
+                elif i in lost:
+                    node["state"] = "lost"
+                else:
+                    node["state"] = "inactive"
+                nodes.append(node)
+            return nodes, winners
+
+        nodes_a, winners_a = _build_nodes(obj_a, state_a)
+        nodes_b, winners_b = _build_nodes(obj_b, state_b)
+
+        def _extract_edges(from_name, to_name, from_winners, to_area_n):
+            edges = []
+            conn = self._get_connectome(from_name, to_name)
+            if conn is None or conn.size == 0:
+                return edges
+
+            sources = sorted(from_winners) if winners_only and from_winners else range(
+                min(conn.shape[0], self.brain.area_by_name[from_name].n))
+
+            for src in sources:
+                if src >= conn.shape[0]:
+                    continue
+                row = conn[src]
+                for tgt in range(min(to_area_n, conn.shape[1])):
+                    w = float(row[tgt])
+                    if w > 0:
+                        edges.append({
+                            "source": src, "target": tgt,
+                            "weight": round(w, 4),
+                        })
+            return edges
+
+        edges_ab = _extract_edges(area_a, area_b, winners_a, obj_b.n)
+        edges_ba = _extract_edges(area_b, area_a, winners_b, obj_a.n)
+
+        meta = {
+            "area_a": area_a, "area_b": area_b,
+            "n_a": obj_a.n, "n_b": obj_b.n,
+            "winners_a": len(winners_a), "winners_b": len(winners_b),
+            "edges_ab_count": len(edges_ab),
+            "edges_ba_count": len(edges_ba),
+        }
+
+        return {
+            "nodes_a": nodes_a, "nodes_b": nodes_b,
+            "edges_ab": edges_ab, "edges_ba": edges_ba,
+            "meta": meta,
+        }
+
+    def get_area_edge_summary(self) -> dict:
+        """Get aggregate weight stats for each undirected area pair.
+
+        Returns dict mapping "areaA__areaB" → {mean_weight, pct_strengthened,
+        max_weight} combining both directions. Used for undirected edge
+        display in the area graph.
+        """
+        areas = list(self.brain.area_by_name.keys())
+        summary = {}
+        seen = set()
+
+        for a in areas:
+            for b in areas:
+                if a == b:
+                    continue
+                key = "__".join(sorted([a, b]))
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                stats_ab = self.get_weight_stats(a, b)
+                stats_ba = self.get_weight_stats(b, a)
+
+                # Combine both directions
+                mean_w = max(stats_ab.get("mean_nonzero", 0),
+                             stats_ba.get("mean_nonzero", 0))
+                max_w = max(stats_ab.get("max", 0), stats_ba.get("max", 0))
+
+                total_nz = (stats_ab.get("nonzero", 0) +
+                            stats_ba.get("nonzero", 0))
+                total_all = (stats_ab.get("total", 1) +
+                             stats_ba.get("total", 1))
+
+                # Count strengthened (weight > initial 1.0)
+                pct_strong = 0.0
+                for stats in [stats_ab, stats_ba]:
+                    if stats.get("max", 0) > 1.001:
+                        pct_strong = max(pct_strong,
+                                         (stats.get("max", 0) - 1.0) * 100)
+
+                summary[key] = {
+                    "area_a": sorted([a, b])[0],
+                    "area_b": sorted([a, b])[1],
+                    "mean_weight": round(mean_w, 4),
+                    "max_weight": round(max_w, 4),
+                    "pct_strengthened": round(pct_strong, 1),
+                    "total_connections": total_nz,
+                }
+
+        return summary
+
     # ── Internal ────────────────────────────────────────────────────────
 
     def _log(self, operation: str, description: str,

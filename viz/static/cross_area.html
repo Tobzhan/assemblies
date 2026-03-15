@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cross-Area Connections — Assembly Calculus Workbench</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f0f1a;
+    color: #e0e0ee;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    overflow: hidden;
+  }
+  #header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a4a;
+  }
+  #header h1 {
+    font-size: 18px; font-weight: 600;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  #header .back-btn {
+    background: #2a2a4a; color: #e0e0ee; border: 1px solid #3a3a5a;
+    border-radius: 6px; padding: 6px 14px; cursor: pointer;
+    font-size: 12px; text-decoration: none;
+  }
+  #header .back-btn:hover { background: #3a3a5a; }
+  #controls {
+    display: flex; gap: 12px; align-items: center;
+    padding: 8px 20px;
+    background: #151528; border-bottom: 1px solid #2a2a4a;
+    font-size: 12px;
+  }
+  .tab-group { display: flex; gap: 4px; }
+  .tab-btn {
+    background: #2a2a4a; color: #888; border: 1px solid #3a3a5a;
+    border-radius: 4px; padding: 4px 12px; cursor: pointer;
+    font-size: 12px;
+  }
+  .tab-btn.active { background: #6366f1; color: #fff; border-color: #6366f1; }
+  .tab-btn:hover { background: #3a3a5a; }
+  .legend {
+    display: flex; gap: 16px; align-items: center;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 4px; font-size: 11px;
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  .stats { margin-left: auto; color: #6366f1; font-weight: 500; font-size: 12px; }
+  #sigma-container {
+    width: 100vw;
+    height: calc(100vh - 88px);
+  }
+  /* Area labels on left/right */
+  .area-label {
+    position: fixed; top: 50%; transform: translateY(-50%);
+    font-size: 24px; font-weight: 700; color: rgba(99, 102, 241, 0.15);
+    writing-mode: vertical-rl; text-orientation: mixed;
+    pointer-events: none; z-index: 10;
+  }
+  .area-label.left { left: 20px; }
+  .area-label.right { right: 20px; }
+  #tooltip {
+    position: fixed; display: none;
+    background: #1a1a2e; border: 1px solid #6366f1;
+    border-radius: 6px; padding: 8px 12px;
+    font-size: 11px; color: #e0e0ee;
+    pointer-events: none; z-index: 1000;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+  }
+  #loading {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 14px; color: #6366f1;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <a class="back-btn" href="/" onclick="window.close(); return false;">← Back</a>
+  <h1>🔗 Cross-Area: <span id="area-a-name">...</span> ↔ <span id="area-b-name">...</span></h1>
+  <div id="meta-text" style="font-size:12px;color:#888"></div>
+</div>
+
+<div id="controls">
+  <div class="tab-group">
+    <button class="tab-btn active" id="tab-ab" onclick="setDirection('ab')">
+      <span id="tab-ab-text">A → B</span>
+    </button>
+    <button class="tab-btn" id="tab-ba" onclick="setDirection('ba')">
+      <span id="tab-ba-text">B → A</span>
+    </button>
+    <button class="tab-btn" id="tab-both" onclick="setDirection('both')">Both</button>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#4ade80"></span> Winner</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#22d3ee"></span> Gained</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#f87171"></span> Lost</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#2a2a3a"></span> Inactive</div>
+  </div>
+  <label style="font-size:12px"><input type="checkbox" id="winners-only" checked /> Winners only</label>
+  <div class="stats" id="stats-text"></div>
+</div>
+
+<div class="area-label left" id="label-left"></div>
+<div class="area-label right" id="label-right"></div>
+<div id="sigma-container"></div>
+<div id="tooltip"></div>
+<div id="loading">Loading cross-area data...</div>
+
+<script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
+
+<script>
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const areaA = params.get('a');
+  const areaB = params.get('b');
+  if (!areaA || !areaB) {
+    document.getElementById('loading').textContent = 'Error: Use ?a=AreaA&b=AreaB';
+    return;
+  }
+  document.getElementById('area-a-name').textContent = areaA;
+  document.getElementById('area-b-name').textContent = areaB;
+  document.getElementById('tab-ab-text').textContent = `${areaA} → ${areaB}`;
+  document.getElementById('tab-ba-text').textContent = `${areaB} → ${areaA}`;
+  document.getElementById('label-left').textContent = areaA;
+  document.getElementById('label-right').textContent = areaB;
+
+  const STATE_COLORS = {
+    winner: '#4ade80', gained: '#22d3ee', lost: '#f87171', inactive: '#2a2a3a',
+  };
+  const STATE_SIZES = {
+    winner: 5, gained: 6, lost: 5, inactive: 2,
+  };
+
+  let renderer = null;
+  let graphData = null;
+  let currentDirection = 'ab';
+
+  async function loadData() {
+    try {
+      const resp = await fetch(`/api/cross/${encodeURIComponent(areaA)}/${encodeURIComponent(areaB)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      graphData = await resp.json();
+      document.getElementById('loading').style.display = 'none';
+      const m = graphData.meta;
+      document.getElementById('meta-text').textContent =
+        `${areaA}: ${m.winners_a}w/${m.n_a}n | ${areaB}: ${m.winners_b}w/${m.n_b}n`;
+      renderGraph();
+    } catch (e) {
+      document.getElementById('loading').textContent = `Error: ${e.message}`;
+    }
+  }
+
+  window.setDirection = function(dir) {
+    currentDirection = dir;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(`tab-${dir}`).classList.add('active');
+    renderGraph();
+  };
+
+  document.getElementById('winners-only').addEventListener('change', renderGraph);
+
+  function renderGraph() {
+    const { nodes_a, nodes_b, edges_ab, edges_ba, meta } = graphData;
+    const winnersOnly = document.getElementById('winners-only').checked;
+
+    const graph = new graphology.Graph({ type: 'directed', multi: true, allowSelfLoops: false });
+
+    // Filter nodes
+    const filterNodes = (nodes, prefix) => {
+      return winnersOnly
+        ? nodes.filter(n => n.state !== 'inactive')
+        : nodes;
+    };
+
+    const visA = filterNodes(nodes_a, 'a');
+    const visB = filterNodes(nodes_b, 'b');
+
+    // Bipartite layout: A on left, B on right
+    const spacing = 800;
+    const halfH = Math.max(visA.length, visB.length) * 3;
+
+    visA.forEach((node, i) => {
+      const y = -halfH/2 + (i / Math.max(visA.length - 1, 1)) * halfH;
+      graph.addNode(`a_${node.id}`, {
+        x: -spacing/2, y,
+        size: STATE_SIZES[node.state],
+        color: STATE_COLORS[node.state],
+        label: `${areaA}:${node.id}`,
+        state: node.state,
+        side: 'a',
+        neuronId: node.id,
+      });
+    });
+
+    visB.forEach((node, i) => {
+      const y = -halfH/2 + (i / Math.max(visB.length - 1, 1)) * halfH;
+      graph.addNode(`b_${node.id}`, {
+        x: spacing/2, y,
+        size: STATE_SIZES[node.state],
+        color: STATE_COLORS[node.state],
+        label: `${areaB}:${node.id}`,
+        state: node.state,
+        side: 'b',
+        neuronId: node.id,
+      });
+    });
+
+    // Add edges based on direction
+    const nodeSetA = new Set(visA.map(n => n.id));
+    const nodeSetB = new Set(visB.map(n => n.id));
+    let edgeCount = 0;
+
+    const addEdges = (edges, srcPrefix, tgtPrefix, srcSet, tgtSet, color) => {
+      edges.forEach((edge, i) => {
+        if (srcSet.has(edge.source) && tgtSet.has(edge.target)) {
+          const isStrong = edge.weight > 1.001;
+          try {
+            graph.addEdge(`${srcPrefix}_${edge.source}`, `${tgtPrefix}_${edge.target}`, {
+              size: isStrong ? 1.5 : 0.3,
+              color: isStrong ? color : 'rgba(58, 58, 90, 0.1)',
+              weight: edge.weight,
+              type: 'arrow',
+            });
+            edgeCount++;
+          } catch(e) { /* skip duplicates */ }
+        }
+      });
+    };
+
+    if (currentDirection === 'ab' || currentDirection === 'both') {
+      addEdges(edges_ab, 'a', 'b', nodeSetA, nodeSetB, 'rgba(99, 102, 241, 0.4)');
+    }
+    if (currentDirection === 'ba' || currentDirection === 'both') {
+      addEdges(edges_ba, 'b', 'a', nodeSetB, nodeSetA, 'rgba(251, 191, 36, 0.4)');
+    }
+
+    document.getElementById('stats-text').textContent =
+      `${edgeCount} edges shown | A→B: ${meta.edges_ab_count} | B→A: ${meta.edges_ba_count}`;
+
+    // Destroy old renderer
+    if (renderer) { renderer.kill(); renderer = null; }
+
+    const container = document.getElementById('sigma-container');
+    renderer = new Sigma(graph, container, {
+      renderEdgeLabels: false,
+      defaultEdgeType: 'arrow',
+      labelRenderedSizeThreshold: 10,
+      labelFont: 'Inter, sans-serif',
+      labelColor: { color: '#aaa' },
+      stagePadding: 60,
+    });
+
+    // Tooltip
+    const tooltip = document.getElementById('tooltip');
+
+    renderer.on('enterNode', ({ node }) => {
+      const attrs = graph.getNodeAttributes(node);
+      tooltip.innerHTML = `<strong>${attrs.side === 'a' ? areaA : areaB} — Neuron ${attrs.neuronId}</strong><br>
+        State: <span style="color:${STATE_COLORS[attrs.state]}">${attrs.state.toUpperCase()}</span>`;
+      tooltip.style.display = 'block';
+    });
+
+    renderer.on('leaveNode', () => { tooltip.style.display = 'none'; });
+
+    renderer.on('enterEdge', ({ edge }) => {
+      const attrs = graph.getEdgeAttributes(edge);
+      const [src, tgt] = graph.extremities(edge);
+      tooltip.innerHTML = `<strong>${src} → ${tgt}</strong><br>
+        Weight: <span style="color:#6366f1">${attrs.weight.toFixed(4)}</span>
+        ${attrs.weight > 1.001 ? `<br><span style="color:#4ade80">★ +${((attrs.weight - 1) * 100).toFixed(1)}%</span>` : ''}`;
+      tooltip.style.display = 'block';
+    });
+
+    renderer.on('leaveEdge', () => { tooltip.style.display = 'none'; });
+
+    renderer.on('clickEdge', ({ edge }) => {
+      const attrs = graph.getEdgeAttributes(edge);
+      const [src, tgt] = graph.extremities(edge);
+      tooltip.innerHTML = `<strong>Edge ${src} → ${tgt}</strong><br>
+        Weight: <span style="color:#6366f1;font-size:14px">${attrs.weight.toFixed(4)}</span>
+        ${attrs.weight > 1.001 ? `<br><span style="color:#4ade80">★ Strengthened by ${((attrs.weight - 1) * 100).toFixed(1)}%</span>` : ''}`;
+      tooltip.style.display = 'block';
+    });
+
+    renderer.getMouseCaptor().on('mousemovebody', (e) => {
+      tooltip.style.left = (e.original.clientX + 15) + 'px';
+      tooltip.style.top = (e.original.clientY + 15) + 'px';
+    });
+  }
+
+  loadData();
+})();
+</script>
+</body>
+</html>

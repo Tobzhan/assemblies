@@ -13,8 +13,10 @@ Panels:
 import os
 import sys
 import math
+import json
 
 from dash import Dash, html, dcc, Input, Output, State
+from flask import jsonify, send_from_directory
 import dash
 import plotly.graph_objects as go
 
@@ -35,6 +37,7 @@ def create_app(brain=None):
     if brain is not None:
         _brain = brain
 
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
     app = Dash(__name__)
     _app = app
 
@@ -657,6 +660,26 @@ def create_app(brain=None):
     def update_neuron_detail(area_name, trigger):
         return _render_neuron_detail(area_name)
 
+    # ── Flask API Routes for Sigma.js pages ──────────────────────────
+
+    @app.server.route("/api/area/<area_name>")
+    def api_area(area_name):
+        data = _brain.get_neuron_graph_data(area_name)
+        return jsonify(data)
+
+    @app.server.route("/api/cross/<area_a>/<area_b>")
+    def api_cross(area_a, area_b):
+        data = _brain.get_cross_area_graph_data(area_a, area_b)
+        return jsonify(data)
+
+    @app.server.route("/viz/area")
+    def page_area_detail():
+        return send_from_directory(static_dir, "area_detail.html")
+
+    @app.server.route("/viz/cross")
+    def page_cross_area():
+        return send_from_directory(static_dir, "cross_area.html")
+
     return app
 
 
@@ -781,7 +804,7 @@ def _render_neuron_detail(area_name):
 
 
 def _render_graph(areas, state_override=None):
-    """Render live Cytoscape graph of brain areas."""
+    """Render live Cytoscape graph of brain areas with undirected edges."""
     if not areas:
         return html.Div("Add areas to see the graph.",
                         style={"color": "#666", "fontSize": "13px",
@@ -789,7 +812,7 @@ def _render_graph(areas, state_override=None):
 
     # Use override (e.g. last_snapshot) or fall back to full state
     state = state_override or _brain.get_full_state()
-    fibers = _brain.get_fibers()
+    edge_summary = _brain.get_area_edge_summary()
 
     elements = []
     n_areas = len(areas)
@@ -822,14 +845,46 @@ def _render_graph(areas, state_override=None):
             "classes": " ".join(classes),
         })
 
-    # Add fiber edges
-    for src, dst in fibers:
-        if src in areas and dst in areas:
-            src_state = state.get(src, {})
-            classes = "active" if src_state.get("n_winners", 0) > 0 else ""
+    # Add undirected edges (one per area pair, not two directed)
+    seen_pairs = set()
+    for i, a in enumerate(areas):
+        for j, b in enumerate(areas):
+            if a == b:
+                continue
+            pair_key = "__".join(sorted([a, b]))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+
+            # Get aggregate weight info for edge styling
+            summary = edge_summary.get(pair_key, {})
+            max_w = summary.get("max_weight", 0)
+            pct = summary.get("pct_strengthened", 0)
+
+            # Edge classes based on weight strengthening
+            classes = []
+            if max_w > 1.1:
+                classes.append("strengthened")
+            # Check if either area has active winners
+            a_state = state.get(a, {})
+            b_state = state.get(b, {})
+            if (a_state.get("n_winners", 0) > 0 or
+                    b_state.get("n_winners", 0) > 0):
+                classes.append("active")
+
+            edge_label = ""
+            if pct > 0:
+                edge_label = f"+{pct:.0f}%"
+
             elements.append({
-                "data": {"source": src, "target": dst, "label": ""},
-                "classes": classes,
+                "data": {
+                    "source": a, "target": b,
+                    "label": edge_label,
+                    "pair_key": pair_key,
+                    "area_a": sorted([a, b])[0],
+                    "area_b": sorted([a, b])[1],
+                },
+                "classes": " ".join(classes),
             })
 
     stylesheet = [
@@ -852,12 +907,16 @@ def _render_graph(areas, state_override=None):
         {"selector": "edge",
          "style": {"width": 1, "line-color": "#3a3a5a",
                    "curve-style": "bezier",
-                   "target-arrow-shape": "triangle",
-                   "target-arrow-color": "#3a3a5a",
-                   "arrow-scale": 0.6}},
+                   "target-arrow-shape": "none",
+                   "label": "data(label)",
+                   "font-size": "8px",
+                   "color": "#888",
+                   "text-rotation": "autorotate"}},
         {"selector": "edge.active",
-         "style": {"line-color": "#6366f1", "width": 2,
-                   "target-arrow-color": "#6366f1"}},
+         "style": {"line-color": "#4a4a6a", "width": 1.5}},
+        {"selector": "edge.strengthened",
+         "style": {"line-color": "#6366f1", "width": 2.5,
+                   "color": "#a78bfa"}},
     ]
 
     import dash_cytoscape as cyto

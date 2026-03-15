@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Area Detail — Assembly Calculus Workbench</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f0f1a;
+    color: #e0e0ee;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    overflow: hidden;
+  }
+  #header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a4a;
+  }
+  #header h1 {
+    font-size: 18px; font-weight: 600;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  #header .meta { font-size: 12px; color: #888; }
+  #header .back-btn {
+    background: #2a2a4a; color: #e0e0ee; border: 1px solid #3a3a5a;
+    border-radius: 6px; padding: 6px 14px; cursor: pointer;
+    font-size: 12px; text-decoration: none;
+  }
+  #header .back-btn:hover { background: #3a3a5a; }
+  #controls {
+    display: flex; gap: 12px; align-items: center;
+    padding: 8px 20px;
+    background: #151528; border-bottom: 1px solid #2a2a4a;
+    font-size: 12px;
+  }
+  #controls label { color: #888; }
+  #controls select, #controls input[type="checkbox"] { cursor: pointer; }
+  #controls .stats {
+    margin-left: auto; color: #6366f1; font-weight: 500;
+  }
+  .legend {
+    display: flex; gap: 16px; align-items: center;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 4px; font-size: 11px;
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  #sigma-container {
+    width: 100vw;
+    height: calc(100vh - 88px);
+  }
+  #tooltip {
+    position: fixed; display: none;
+    background: #1a1a2e; border: 1px solid #6366f1;
+    border-radius: 6px; padding: 8px 12px;
+    font-size: 11px; color: #e0e0ee;
+    pointer-events: none; z-index: 1000;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+  }
+  #loading {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 14px; color: #6366f1;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <a class="back-btn" href="/" onclick="window.close(); return false;">← Back</a>
+  <h1>🧠 Area Detail: <span id="area-name">...</span></h1>
+  <div class="meta" id="area-meta"></div>
+</div>
+
+<div id="controls">
+  <div class="legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#4ade80"></span> Winner</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#22d3ee"></span> Gained</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#f87171"></span> Lost</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#2a2a3a"></span> Inactive</div>
+  </div>
+  <label><input type="checkbox" id="show-inactive" /> Show inactive neurons</label>
+  <label><input type="checkbox" id="show-edges" checked /> Show edges</label>
+  <div class="stats" id="stats-text"></div>
+</div>
+
+<div id="sigma-container"></div>
+<div id="tooltip"></div>
+<div id="loading">Loading graph data...</div>
+
+<!-- Graphology + Sigma.js via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
+
+<script>
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const areaName = params.get('area');
+  if (!areaName) {
+    document.getElementById('loading').textContent = 'Error: No area specified. Use ?area=NAME';
+    return;
+  }
+  document.getElementById('area-name').textContent = areaName;
+
+  const STATE_COLORS = {
+    winner:   '#4ade80',
+    gained:   '#22d3ee',
+    lost:     '#f87171',
+    inactive: '#2a2a3a',
+  };
+  const STATE_SIZES = {
+    winner: 5, gained: 6, lost: 5, inactive: 2,
+  };
+
+  let renderer = null;
+  let graphData = null;
+
+  async function loadData() {
+    try {
+      const resp = await fetch(`/api/area/${encodeURIComponent(areaName)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      graphData = await resp.json();
+      document.getElementById('loading').style.display = 'none';
+      renderGraph();
+    } catch (e) {
+      document.getElementById('loading').textContent = `Error loading data: ${e.message}`;
+    }
+  }
+
+  function renderGraph() {
+    const { nodes, edges, meta } = graphData;
+    const showInactive = document.getElementById('show-inactive').checked;
+    const showEdges = document.getElementById('show-edges').checked;
+
+    // Update UI
+    document.getElementById('area-meta').textContent =
+      `n=${meta.n} | k=${meta.k} | β=${meta.beta} | overlap=${(meta.overlap*100).toFixed(0)}%`;
+    document.getElementById('stats-text').textContent =
+      `${meta.n_winners} winners | +${meta.gained} gained | -${meta.lost} lost | ${edges.length} edges`;
+
+    // Build graphology graph
+    const graph = new graphology.Graph({ type: 'directed', allowSelfLoops: false });
+
+    // Calculate layout: circular for winners, grid for all
+    const activeNodes = nodes.filter(n => n.state !== 'inactive');
+    const inactiveNodes = nodes.filter(n => n.state === 'inactive');
+
+    // Place winners in a circle
+    const radius = 300;
+    activeNodes.forEach((node, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(activeNodes.length, 1);
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      graph.addNode(String(node.id), {
+        x, y,
+        size: STATE_SIZES[node.state],
+        color: STATE_COLORS[node.state],
+        label: `Neuron ${node.id}`,
+        state: node.state,
+        neuronId: node.id,
+      });
+    });
+
+    // Place inactive neurons in outer ring
+    if (showInactive) {
+      const outerRadius = radius + 200;
+      inactiveNodes.forEach((node, i) => {
+        const angle = (2 * Math.PI * i) / Math.max(inactiveNodes.length, 1);
+        const x = outerRadius * Math.cos(angle);
+        const y = outerRadius * Math.sin(angle);
+        graph.addNode(String(node.id), {
+          x, y,
+          size: STATE_SIZES.inactive,
+          color: STATE_COLORS.inactive,
+          label: `Neuron ${node.id}`,
+          state: node.state,
+          neuronId: node.id,
+        });
+      });
+    }
+
+    // Add edges
+    if (showEdges) {
+      const nodeSet = new Set(graph.nodes());
+      edges.forEach((edge, i) => {
+        const src = String(edge.source);
+        const tgt = String(edge.target);
+        if (nodeSet.has(src) && nodeSet.has(tgt)) {
+          const isStrengthened = edge.weight > 1.001;
+          try {
+            graph.addEdge(src, tgt, {
+              size: isStrengthened ? 1.5 : 0.3,
+              color: isStrengthened ? 'rgba(99, 102, 241, 0.4)' : 'rgba(58, 58, 90, 0.15)',
+              weight: edge.weight,
+              type: 'arrow',
+            });
+          } catch(e) { /* duplicate edge, skip */ }
+        }
+      });
+    }
+
+    // Destroy old renderer
+    if (renderer) { renderer.kill(); renderer = null; }
+
+    // Create Sigma renderer
+    const container = document.getElementById('sigma-container');
+    renderer = new Sigma(graph, container, {
+      renderEdgeLabels: false,
+      defaultEdgeType: 'arrow',
+      edgeReducer: (edge, data) => ({
+        ...data,
+        hidden: !showEdges,
+      }),
+      labelRenderedSizeThreshold: 12,
+      labelFont: 'Inter, sans-serif',
+      labelColor: { color: '#aaa' },
+      stagePadding: 40,
+    });
+
+    // Tooltip on hover
+    const tooltip = document.getElementById('tooltip');
+
+    renderer.on('enterNode', ({ node }) => {
+      const attrs = graph.getNodeAttributes(node);
+      tooltip.innerHTML = `<strong>Neuron ${attrs.neuronId}</strong><br>
+        State: <span style="color:${STATE_COLORS[attrs.state]}">${attrs.state.toUpperCase()}</span>`;
+      tooltip.style.display = 'block';
+    });
+
+    renderer.on('leaveNode', () => {
+      tooltip.style.display = 'none';
+    });
+
+    renderer.on('enterEdge', ({ edge }) => {
+      const attrs = graph.getEdgeAttributes(edge);
+      const [src, tgt] = graph.extremities(edge);
+      tooltip.innerHTML = `<strong>${src} → ${tgt}</strong><br>
+        Weight: <span style="color:#6366f1">${attrs.weight.toFixed(4)}</span>
+        ${attrs.weight > 1.001 ? '<br><span style="color:#4ade80">★ Strengthened</span>' : ''}`;
+      tooltip.style.display = 'block';
+    });
+
+    renderer.on('leaveEdge', () => {
+      tooltip.style.display = 'none';
+    });
+
+    // Move tooltip with mouse
+    renderer.getMouseCaptor().on('mousemovebody', (e) => {
+      tooltip.style.left = (e.original.clientX + 15) + 'px';
+      tooltip.style.top = (e.original.clientY + 15) + 'px';
+    });
+
+    // Click edge to keep tooltip visible
+    renderer.on('clickEdge', ({ edge }) => {
+      const attrs = graph.getEdgeAttributes(edge);
+      const [src, tgt] = graph.extremities(edge);
+      tooltip.innerHTML = `<strong>Edge ${src} → ${tgt}</strong><br>
+        Weight: <span style="color:#6366f1;font-size:14px">${attrs.weight.toFixed(4)}</span>
+        ${attrs.weight > 1.001 ? `<br><span style="color:#4ade80">★ Strengthened by ${((attrs.weight - 1) * 100).toFixed(1)}%</span>` : ''}`;
+      tooltip.style.display = 'block';
+    });
+  }
+
+  // Checkbox handlers
+  document.getElementById('show-inactive').addEventListener('change', renderGraph);
+  document.getElementById('show-edges').addEventListener('change', renderGraph);
+
+  // Load data
+  loadData();
+})();
+</script>
+</body>
+</html>
