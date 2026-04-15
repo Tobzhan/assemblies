@@ -122,6 +122,8 @@
   const params = new URLSearchParams(window.location.search);
   const areaA = params.get('a');
   const areaB = params.get('b');
+  const source = params.get('source') || '';
+  const apiBase = source === 'dfa' ? '/api/dfa/cross' : '/api/cross';
   if (!areaA || !areaB) {
     document.getElementById('loading').textContent = 'Error: Use ?a=AreaA&b=AreaB';
     return;
@@ -146,7 +148,7 @@
 
   async function loadData() {
     try {
-      const resp = await fetch(`/api/cross/${encodeURIComponent(areaA)}/${encodeURIComponent(areaB)}`);
+      const resp = await fetch(`${apiBase}/${encodeURIComponent(areaA)}/${encodeURIComponent(areaB)}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       graphData = await resp.json();
       document.getElementById('loading').style.display = 'none';

@@ -24,9 +24,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from viz.brain_api import LiveBrain
 from viz.graph_builder import build_area_graph, create_graph_component
+from viz.dfa_page import dfa_layout, register_dfa_callbacks
 
 # ── Globals ──────────────────────────────────────────────────────────────────
 
+ACCENT = "#6366f1"
 _app = None
 _brain = LiveBrain(p=0.1, beta=0.05, seed=42)
 
@@ -38,7 +40,7 @@ def create_app(brain=None):
         _brain = brain
 
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-    app = Dash(__name__)
+    app = Dash(__name__, suppress_callback_exceptions=True)
     _app = app
 
     # ── Styles ───────────────────────────────────────────────────────────
@@ -97,29 +99,71 @@ def create_app(brain=None):
 
     # ── Layout ───────────────────────────────────────────────────────────
 
-    app.layout = html.Div(
-        style={
-            "backgroundColor": dark_bg, "minHeight": "100vh",
-            "padding": "20px", "fontFamily": "'Inter', 'Segoe UI', sans-serif",
-            "color": text_color,
-        },
-        children=[
-            # Header
-            html.Div(
-                style={"display": "flex", "alignItems": "center",
-                       "justifyContent": "space-between", "marginBottom": "20px"},
-                children=[
-                    html.H1("🧠 Assembly Calculus Workbench", style={
-                        "margin": "0", "fontSize": "24px",
-                        "background": f"linear-gradient(135deg, {accent}, #a78bfa)",
-                        "WebkitBackgroundClip": "text",
-                        "WebkitTextFillColor": "transparent",
-                    }),
-                    html.Div(id="status-bar", style={
-                        "fontSize": "13px", "color": muted,
-                    }),
-                ],
-            ),
+    # Root layout with URL routing
+    app.layout = html.Div([
+        dcc.Location(id="url", refresh=False),
+        html.Div(id="page-content"),
+    ])
+
+    # -- Page-switching callback --
+    @app.callback(
+        Output("page-content", "children"),
+        Input("url", "pathname"),
+    )
+    def display_page(pathname):
+        if pathname == "/dfa":
+            return dfa_layout()
+        return _workbench_layout(
+            dark_bg, panel_bg, accent, text_color, muted,
+            _panel, _btn, _input, _dropdown)
+
+    # Register DFA page callbacks
+    register_dfa_callbacks(app)
+
+    def _workbench_layout(dark_bg, panel_bg, accent, text_color, muted,
+                          _panel, _btn, _input, _dropdown):
+        return html.Div(
+            style={
+                "backgroundColor": dark_bg, "minHeight": "100vh",
+                "padding": "20px",
+                "fontFamily": "'Inter', 'Segoe UI', sans-serif",
+                "color": text_color,
+            },
+            children=[
+                # Header
+                html.Div(
+                    style={"display": "flex", "alignItems": "center",
+                           "justifyContent": "space-between",
+                           "marginBottom": "20px"},
+                    children=[
+                        html.H1("Assembly Calculus Workbench", style={
+                            "margin": "0", "fontSize": "24px",
+                            "background":
+                                f"linear-gradient(135deg, {accent}, #a78bfa)",
+                            "WebkitBackgroundClip": "text",
+                            "WebkitTextFillColor": "transparent",
+                        }),
+                        html.Div(style={"display": "flex", "gap": "12px",
+                                        "alignItems": "center"}, children=[
+                            dcc.Link(
+                                html.Button("DFA Playground", style={
+                                    "backgroundColor": ACCENT,
+                                    "color": "#fff",
+                                    "border": "none",
+                                    "borderRadius": "6px",
+                                    "padding": "6px 16px",
+                                    "cursor": "pointer",
+                                    "fontSize": "12px",
+                                    "fontWeight": "600",
+                                }),
+                                href="/dfa",
+                            ),
+                            html.Div(id="status-bar", style={
+                                "fontSize": "13px", "color": muted,
+                            }),
+                        ]),
+                    ],
+                ),
 
             # Main grid: sidebar + content
             html.Div(
@@ -346,7 +390,7 @@ def create_app(brain=None):
             dcc.Store(id="selected-area", data=None),
             dcc.Store(id="nav-open-signal", data=None),
         ],
-    )
+    )  # end _workbench_layout
 
     # ── Callbacks ────────────────────────────────────────────────────────
 
@@ -1247,6 +1291,7 @@ def _render_weight_histogram(from_area, to_area):
 
 if __name__ == "__main__":
     app = create_app()
-    print("🧠 Assembly Calculus Workbench starting...")
+    print("Assembly Calculus Workbench starting...")
     print("   Open http://127.0.0.1:8050 in your browser")
+    print("   DFA Playground at http://127.0.0.1:8050/dfa")
     app.run(debug=True, port=8050)

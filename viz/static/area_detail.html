@@ -100,6 +100,8 @@
 (function() {
   const params = new URLSearchParams(window.location.search);
   const areaName = params.get('area');
+  const source = params.get('source') || '';
+  const apiBase = source === 'dfa' ? '/api/dfa/area' : '/api/area';
   if (!areaName) {
     document.getElementById('loading').textContent = 'Error: No area specified. Use ?area=NAME';
     return;
@@ -121,7 +123,7 @@
 
   async function loadData() {
     try {
-      const resp = await fetch(`/api/area/${encodeURIComponent(areaName)}`);
+      const resp = await fetch(`${apiBase}/${encodeURIComponent(areaName)}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       graphData = await resp.json();
       document.getElementById('loading').style.display = 'none';
